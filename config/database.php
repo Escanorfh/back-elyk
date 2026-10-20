@@ -3,6 +3,26 @@
 use Illuminate\Support\Str;
 use Pdo\Mysql;
 
+// Wasmer Edge injects DB_HOST/DB_PORT/DB_NAME/DB_USERNAME/DB_PASSWORD at runtime
+// and its managed MySQL uses a private CA, so TLS must be on without chain verification.
+$sslVerify = env('DB_SSL_VERIFY');
+if ($sslVerify === null) {
+    $sslVerify = ! str_contains((string) env('DB_HOST', ''), 'wasmernet.com');
+}
+
+$mysqlSslOptions = [];
+if (extension_loaded('pdo_mysql')) {
+    $sslCa = env('MYSQL_ATTR_SSL_CA');
+    if ($sslCa !== null) {
+        $mysqlSslOptions[PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA] = $sslCa;
+    }
+    if (! $sslVerify) {
+        $mysqlSslOptions[PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_VERIFY_SERVER_CERT : PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
+    }
+}
+
+$databaseName = env('DB_DATABASE', env('DB_NAME', 'laravel'));
+
 return [
 
     /*
@@ -49,7 +69,7 @@ return [
             'url' => env('DB_URL'),
             'host' => env('DB_HOST', '127.0.0.1'),
             'port' => env('DB_PORT', '3306'),
-            'database' => env('DB_DATABASE', 'laravel'),
+            'database' => $databaseName,
             'username' => env('DB_USERNAME', 'root'),
             'password' => env('DB_PASSWORD', ''),
             'unix_socket' => env('DB_SOCKET', ''),
@@ -59,9 +79,7 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
-            'options' => extension_loaded('pdo_mysql') ? array_filter([
-                (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
-            ]) : [],
+            'options' => $mysqlSslOptions,
         ],
 
         'mariadb' => [
@@ -69,7 +87,7 @@ return [
             'url' => env('DB_URL'),
             'host' => env('DB_HOST', '127.0.0.1'),
             'port' => env('DB_PORT', '3306'),
-            'database' => env('DB_DATABASE', 'laravel'),
+            'database' => $databaseName,
             'username' => env('DB_USERNAME', 'root'),
             'password' => env('DB_PASSWORD', ''),
             'unix_socket' => env('DB_SOCKET', ''),
@@ -79,9 +97,7 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
-            'options' => extension_loaded('pdo_mysql') ? array_filter([
-                (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
-            ]) : [],
+            'options' => $mysqlSslOptions,
         ],
 
         'pgsql' => [
@@ -89,14 +105,14 @@ return [
             'url' => env('DB_URL'),
             'host' => env('DB_HOST', '127.0.0.1'),
             'port' => env('DB_PORT', '5432'),
-            'database' => env('DB_DATABASE', 'laravel'),
+            'database' => $databaseName,
             'username' => env('DB_USERNAME', 'root'),
             'password' => env('DB_PASSWORD', ''),
             'charset' => env('DB_CHARSET', 'utf8'),
             'prefix' => '',
             'prefix_indexes' => true,
             'search_path' => 'public',
-            'sslmode' => env('DB_SSLMODE', 'prefer'),
+            'sslmode' => env('DB_SSLMODE', $sslVerify ? 'prefer' : 'require'),
         ],
 
         'sqlsrv' => [

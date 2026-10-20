@@ -23,4 +23,7 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 
-/vendor/
+
+/livekit-bin/
+/livekit.zip
+/symfony/
