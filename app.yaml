@@ -2,7 +2,7 @@ kind: wasmer.io/App.v0
 owner: Escanorfh
 name: back-elyk
 package: .
-debug: true
+debug: false
 
 capabilities:
   database:

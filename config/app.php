@@ -1,5 +1,11 @@
 <?php
 
+// في بيئة الإنتاج نمنع تسريب تفاصيل الأخطاء (stack traces) حتى لو كان
+// APP_DEBUG=true متسابه في متغيرات البيئة. للتشخيص المؤقت شغّل السيرفر
+// محلياً بـ APP_ENV=local، أو فعّل السطر التالي بشكل مؤقت.
+$appEnv = env('APP_ENV', 'production');
+$isProduction = $appEnv === 'production';
+
 return [
 
     /*
@@ -39,7 +45,7 @@ return [
     |
     */
 
-    'debug' => (bool) env('APP_DEBUG', false),
+    'debug' => $isProduction ? false : (bool) env('APP_DEBUG', false),
 
     /*
     |--------------------------------------------------------------------------
