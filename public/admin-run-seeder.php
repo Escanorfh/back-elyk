@@ -111,5 +111,13 @@ if ($mode === 'questions') {
     exit;
 }
 
+if ($mode === 'revoke') {
+    $deleted = DB::table('personal_access_tokens')->where('name', 'temp-verify')->delete();
+
+    echo json_encode(['revoked' => $deleted], JSON_PRETTY_PRINT);
+
+    exit;
+}
+
 http_response_code(400);
 echo json_encode(['error' => 'unknown mode']);
