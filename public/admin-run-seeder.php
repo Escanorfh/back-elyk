@@ -66,5 +66,50 @@ if ($mode === 'summary') {
     exit;
 }
 
+if ($mode === 'token') {
+    $role = $_GET['role'] ?? 'patient';
+    $user = DB::table('users')->where('role', $role)->orderBy('id')->first();
+
+    if (! $user) {
+        echo json_encode(['error' => 'no user with role ' . $role]);
+
+        exit;
+    }
+
+    $model = \App\Models\User::find($user->id);
+    $token = $model->createToken('temp-verify')->plainTextToken;
+
+    echo json_encode([
+        'user_id' => $model->id,
+        'role' => $model->role,
+        'token' => $token,
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+
+    exit;
+}
+
+if ($mode === 'questions') {
+    $examId = (int) ($_GET['id'] ?? 0);
+    $exam = DB::selectOne('SELECT id, name, name_ar, min_level_score, max_level_score FROM exams WHERE id = ?', [$examId]);
+
+    if (! $exam) {
+        echo json_encode(['error' => 'exam not found']);
+
+        exit;
+    }
+
+    $questions = DB::select('SELECT id, subscale_id, text, text_ar, type, `order` FROM questions WHERE exam_id = ? ORDER BY `order`', [$examId]);
+    foreach ($questions as $q) {
+        $q->options = DB::select('SELECT id, text, text_ar, score, `order` FROM question_options WHERE question_id = ? ORDER BY `order`', [$q->id]);
+    }
+
+    echo json_encode([
+        'exam' => $exam,
+        'questions' => $questions,
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+
+    exit;
+}
+
 http_response_code(400);
 echo json_encode(['error' => 'unknown mode']);
