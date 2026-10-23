@@ -1,0 +1,42 @@
+kind: wasmer.io/App.v0
+owner: Escanorfh
+name: back-elyk
+package: .
+debug: false
+
+capabilities:
+  database:
+    engine: mysql
+
+locality:
+  regions:
+    - fr-roub1
+
+scaling:
+  mode: single_concurrency
+
+health_checks:
+  - http:
+      method: get
+      path: /up
+      interval: 30s
+      timeout: 10s
+      unhealthy_threshold: 6
+      healthy_threshold: 1
+      expected_status_codes:
+        - 200
+
+env:
+  APP_ENV: production
+  APP_DEBUG: "false"
+  LOG_CHANNEL: stderr
+  LOG_LEVEL: error
+  APP_KEY: "base64:9NaPiBBcAPrMQhgAq7A4HDcQRy3cR+ZBb8NX1OC3+vc="
+  DB_CONNECTION: mysql
+  SESSION_DRIVER: database
+  CACHE_STORE: database
+  QUEUE_CONNECTION: database
+  BROADCAST_CONNECTION: log
+  FILESYSTEM_DISK: local
+  CORS_ALLOWED_ORIGINS: "*"
+  APP_URL: "https://back-elyk.wasmer.app"

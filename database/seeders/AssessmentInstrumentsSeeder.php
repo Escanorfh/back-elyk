@@ -22,7 +22,7 @@ class AssessmentInstrumentsSeeder extends Seeder
         $this->seedYbocs();
     }
 
-    private function seedExam(array $disorderData, array $examData, array $subscales, array $bands): Exam
+    private function seedExam(array $disorderData, array $examData, array $subscales, array $bands): ?Exam
     {
         $disorder = Disorder::firstOrCreate(
             ['name_ar' => $disorderData['name_ar']],
@@ -31,7 +31,7 @@ class AssessmentInstrumentsSeeder extends Seeder
 
         $existing = Exam::where('name_ar', $examData['name_ar'])->first();
         if ($existing) {
-            return $existing;
+            return null;
         }
 
         $exam = Exam::create(array_merge($examData, ['disorder_id' => $disorder->id, 'is_active' => true]));
@@ -58,7 +58,9 @@ class AssessmentInstrumentsSeeder extends Seeder
             ]);
         }
 
-        return $exam->fresh(['subscales']);
+        $exam->setRelation('subscales', collect($subscaleModels));
+
+        return $exam;
     }
 
     private function addQuestion(Exam $exam, Subscale $subscale, string $text, string $textAr, array $options, int $order): void
@@ -105,6 +107,10 @@ class AssessmentInstrumentsSeeder extends Seeder
             ],
             []
         );
+
+        if (! $exam) {
+            return;
+        }
 
         $options = [
             ['Never', 'أبداً', 0],
@@ -165,6 +171,10 @@ class AssessmentInstrumentsSeeder extends Seeder
             ]
         );
 
+        if (! $exam) {
+            return;
+        }
+
         $options = [
             ['Not at all', 'أبدا', 0],
             ['Several days', 'بعض الأيام', 1],
@@ -214,6 +224,10 @@ class AssessmentInstrumentsSeeder extends Seeder
                 ['min' => 32, 'max' => 40, 'label' => 'Extreme', 'label_ar' => 'شديد', 'alert' => true],
             ]
         );
+
+        if (! $exam) {
+            return;
+        }
 
         $items = [
             [

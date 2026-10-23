@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: aalyk-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /up
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: false
+      - key: LOG_CHANNEL
+        value: stack
+      - key: BROADCAST_CONNECTION
+        value: log
+      - key: CACHE_STORE
+        value: database
+      - key: SESSION_DRIVER
+        value: database
+      - key: QUEUE_CONNECTION
+        value: database
+      - key: DB_CONNECTION
+        value: mysql
+      - key: DB_HOST
+        value: mysql-c779fec-xfarouk7-6d6b.c.aivencloud.com
+      - key: DB_PORT
+        value: 21135
+      - key: DB_DATABASE
+        value: defaultdb
+      - key: MYSQL_ATTR_SSL_CA
+        value: /var/www/html/docker/certs/aiven-ca.pem
+      # Fill these in the Render dashboard (sensitive values):
+      # APP_KEY, APP_URL (https://aalyk-api.onrender.com),
+      # DB_USERNAME (avnadmin), DB_PASSWORD,
+      # LIVEKIT_URL, LIVEKIT_WS_URL,
+      # LIVEKIT_API_KEY, LIVEKIT_API_SECRET, FAWRY_*, INSTAPAY_*
