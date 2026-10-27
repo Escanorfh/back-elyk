@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class IntakeBattery extends Model
 {
-    protected $fillable = ['patient_id', 'status', 'started_at', 'completed_at'];
+    protected $fillable = ['patient_id', 'status', 'started_at', 'completed_at', 'last_activity_at', 'last_reminded_at'];
 
     protected $casts = [
         'started_at' => 'datetime',

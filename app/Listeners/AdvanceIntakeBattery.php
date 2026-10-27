@@ -44,25 +44,21 @@ class AdvanceIntakeBattery
 
         if (!$battery) return;
 
-        // Check if the current attempt matches the active item
-        $currentItem = $battery->currentItem;
-        if ($currentItem && $currentItem->exam_id === $attempt->exam_id) {
-            // Mark completed
-            $currentItem->update([
+        // المريض اختار مقياس واحد وخلّصه — ده كافي لإتمام الفحص الأولي.
+        // باقي المقاييس تفضل متاحة كاختيار حر من شاشة التقييمات.
+        $item = $battery->items()->where('exam_id', $attempt->exam_id)->first();
+        if ($item) {
+            $item->update([
                 'status' => 'completed',
                 'attempt_id' => $attempt->id
             ]);
-
-            // Find next pending item
-            $nextItem = $battery->items()->where('status', 'pending')->orderBy('order')->first();
-            
-            if ($nextItem) {
-                $nextItem->update(['status' => 'active']);
-            } else {
-                // Battery completed
-                $battery->update(['status' => 'completed', 'completed_at' => now()]);
-                $patient->update(['intake_completed_at' => now()]);
-            }
         }
+
+        $battery->update([
+            'status' => 'completed',
+            'completed_at' => now(),
+            'last_activity_at' => now(),
+        ]);
+        $patient->update(['intake_completed_at' => now()]);
     }
 }

@@ -16,14 +16,13 @@ class AttemptController extends Controller {
         $this->scoringService = $scoringService;
     }
     public function store(Exam $exam, Request $request) {
+        if (!$exam->is_active) abort(404, "Exam not active");
+
+        // المريض حر يختار أي تقييم نشط — مفيش ترتيب إجباري للـ intake.
         $battery = \App\Models\IntakeBattery::where('patient_id', $request->user()->id)
             ->where('status', 'in_progress')->first();
-        
+
         if ($battery) {
-            $currentItem = $battery->currentItem;
-            if (!$currentItem || $currentItem->exam_id !== $exam->id) {
-                return response()->json(["message" => "Please complete your intake exams in the assigned order."], 403);
-            }
             $battery->update(['last_activity_at' => now()]);
         }
 
