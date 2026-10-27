@@ -1,42 +1,53 @@
 kind: wasmer.io/App.v0
-owner: Escanorfh
 name: back-elyk
+app_id: da_K6AIot5U1o3w
+owner: escanorfh
 package: .
-debug: false
-
-capabilities:
-  database:
-    engine: mysql
-
 locality:
   regions:
-    - fr-roub1
-
-scaling:
-  mode: single_concurrency
-
-health_checks:
-  - http:
-      method: get
-      path: /up
-      interval: 30s
-      timeout: 10s
-      unhealthy_threshold: 6
-      healthy_threshold: 1
-      expected_status_codes:
-        - 200
-
+  - fr-roub1
 env:
+  APP_RUNNING_IN_CONSOLE: 'false'
   APP_ENV: production
-  APP_DEBUG: "false"
+  APP_DEBUG: 'false'
   LOG_CHANNEL: stderr
   LOG_LEVEL: error
-  APP_KEY: "base64:9NaPiBBcAPrMQhgAq7A4HDcQRy3cR+ZBb8NX1OC3+vc="
+  APP_KEY: base64:9NaPiBBcAPrMQhgAq7A4HDcQRy3cR+ZBb8NX1OC3+vc=
   DB_CONNECTION: mysql
   SESSION_DRIVER: database
   CACHE_STORE: database
   QUEUE_CONNECTION: database
   BROADCAST_CONNECTION: log
   FILESYSTEM_DISK: local
-  CORS_ALLOWED_ORIGINS: "*"
-  APP_URL: "https://back-elyk.wasmer.app"
+  CORS_ALLOWED_ORIGINS: '*'
+  APP_URL: https://back-elyk.wasmer.app
+capabilities:
+  database:
+    engine: mysql
+debug: false
+scaling:
+  mode: single_concurrency
+jobs:
+- name: after_deploy
+  trigger: post-deployment
+  action:
+    execute:
+      command: after_deploy
+annotations:
+  anybuild.run/config:
+    composer_build_script: post-update-cmd
+    composer_enable: true
+    name: out
+    node_build_command: npm run build
+    node_install_inputs:
+    - package.json
+    node_package_manager: npm
+    npm_version: '11'
+    php_framework: laravel
+    php_public_dir: public
+    phpix: true
+  anybuild.run/provider: laravel
+  anybuild.run/version: 0.33.0
+  wasmer.io/version: 7.5.0
+enableDatabase: true
+enable_email: true
