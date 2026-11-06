@@ -18,7 +18,6 @@ return Application::configure(basePath: dirname(__DIR__))
             'webhook.signature' => \App\Http\Middleware\VerifyWebhookSignature::class,
             'scheduler.token' => \App\Http\Middleware\AuthenticateSchedulerToken::class,
         ]);
-        $middleware->api(append: [\App\Http\Middleware\TraceApi::class]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         // API غير مفوتر → 401 JSON، بدلاً من محاولة redirect إلى route "login" غير الموجودة.
