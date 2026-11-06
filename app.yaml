@@ -19,8 +19,15 @@ env:
   QUEUE_CONNECTION: database
   BROADCAST_CONNECTION: log
   FILESYSTEM_DISK: local
+  # Wasmer's container filesystem is wiped on deploy; uploads live on the
+  # volume mounted below instead of storage/app/public.
+  PUBLIC_DISK_ROOT: /data
+  INSTAPAY_PAYMENT_LINK: "https://ipn.eg/S/emanyasso123./instapay/775D3W"
   CORS_ALLOWED_ORIGINS: '*'
   APP_URL: https://back-elyk.wasmer.app
+volumes:
+- name: media
+  mount: /data
 capabilities:
   database:
     engine: mysql
@@ -47,7 +54,7 @@ annotations:
     php_public_dir: public
     phpix: true
   anybuild.run/provider: laravel
-  anybuild.run/version: 0.33.0
+  anybuild.run/version: 0.33.2
   wasmer.io/version: 7.5.0
 enableDatabase: true
 enable_email: true
