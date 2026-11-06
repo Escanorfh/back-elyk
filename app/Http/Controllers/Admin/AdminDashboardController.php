@@ -2,6 +2,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Enums\SessionStatus;
 use App\Models\User;
 use App\Models\Exam;
 use App\Models\ExamAttempt;
@@ -51,6 +52,19 @@ class AdminDashboardController extends Controller {
     /// إحصائيات لوحة التحكم: أعداد المرضى، المسارات، الجلسات، التقييمات.
     public function stats(Request $request)
     {
+        // استعلام واحد يجمع الحالات كلها، والمفاتيح الستة موجودة دائمًا ولو بصفر:
+        // لوحة الأدمن لا تتعامل مع حالة ظهرت لاحقًا كمفتاح ناقص.
+        $byStatus = LiveSession::query()
+            ->select("status")
+            ->selectRaw("count(*) as aggregate")
+            ->groupBy("status")
+            ->pluck("aggregate", "status")
+            ->all();
+        $sessions = [];
+        foreach (SessionStatus::cases() as $case) {
+            $sessions[$case->value] = (int) ($byStatus[$case->value] ?? 0);
+        }
+
         return response()->json(["data" => [
             "patients_count" => User::where("role", "patient")->count(),
             "admins_count" => User::where("role", "admin")->count(),
@@ -58,11 +72,7 @@ class AdminDashboardController extends Controller {
             "completed_paths" => PatientPath::where("status", "completed")->count(),
             "total_exams_completed" => ExamAttempt::where("status", "completed")->count(),
             "unread_notifications" => $request->user()->unreadNotifications()->count(),
-            "live_sessions" => [
-                "scheduled" => LiveSession::where("status", "scheduled")->count(),
-                "live" => LiveSession::where("status", "live")->count(),
-                "ended" => LiveSession::where("status", "ended")->count(),
-            ],
+            "live_sessions" => $sessions,
         ]]);
     }
 

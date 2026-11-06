@@ -48,7 +48,8 @@ class LiveKitService
             ->setRoomName($roomName)
             ->setCanPublish($canPublishAudio || $canPublishVideo)
             ->setCanPublishData(true)
-            ->setCanSubscribe(true);
+            ->setCanSubscribe(true)
+            ->setCanPublishSources(['camera', 'microphone', 'screen_share', 'screen_share_audio']);
 
         return (new AccessToken($this->apiKey, $this->apiSecret))
             ->init($tokenOptions)

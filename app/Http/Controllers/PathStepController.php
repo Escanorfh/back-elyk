@@ -3,8 +3,11 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\PathStep;
 use App\Models\PatientPath;
+use App\Services\Calendar\PathStepScheduleService;
 
 class PathStepController extends Controller {
+    public function __construct(protected PathStepScheduleService $schedule) {}
+
     public function store(Request $request, $patientId, $disorderId) {
         $validated = $request->validate([
             "title" => "nullable|string|max:500",
@@ -35,6 +38,18 @@ class PathStepController extends Controller {
         ]);
         $step->update($validated);
         return response()->json(["data" => $step]);
+    }
+
+    // جدولة الخطوة داخل التقويم: due_at وحده ما يُدخلها النافذة، وحالتها العلاجية لا تُمسّ هنا.
+    public function scheduleDate(Request $request, PathStep $step) {
+        $validated = $request->validate(PathStepScheduleService::rules());
+        $step = $this->schedule->schedule($step, $validated, $request->user());
+        return response()->json(["data" => $step]);
+    }
+
+    // سحب الموعد: الخطوة تعود «بلا تاريخ» وتتوقف تذكيراتها المعلّقة.
+    public function clearSchedule(PathStep $step) {
+        return response()->json(["data" => $this->schedule->clearDate($step)]);
     }
 
     public function destroy(PathStep $step) {

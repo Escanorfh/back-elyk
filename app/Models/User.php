@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Support\CalendarTime;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -62,4 +63,15 @@ class User extends Authenticatable
     public function patientPaths() { return $this->hasMany(PatientPath::class, "patient_id"); }
     public function assignments() { return $this->hasMany(Assignment::class, "patient_id"); }
     public function settings() { return $this->hasOne(UserSettings::class); }
+    public function calendarEvents() { return $this->hasMany(CalendarEvent::class, "user_id"); }
+    public function personalTasks() { return $this->hasMany(PersonalTask::class, "user_id"); }
+
+    /**
+     * المنطقة المعلَنة لهذا المستخدم؛ NULL تعني «لم يُعلَن تفضيل» فتسقط إلى إعداد التطبيق،
+     * ولا تعني UTC. تُستخدم عند الإنشاء فقط — العرض يستخدم منطقة الجهاز.
+     */
+    public function declaredTimezone(): string
+    {
+        return CalendarTime::timezoneOf($this->settings?->timezone);
+    }
 }

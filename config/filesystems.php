@@ -40,7 +40,9 @@ return [
 
         'public' => [
             'driver' => 'local',
-            'root' => storage_path('app/public'),
+            // Wasmer Edge's container filesystem is wiped on every deploy, so
+            // production points this at a mounted volume via PUBLIC_DISK_ROOT.
+            'root' => env('PUBLIC_DISK_ROOT') ?: storage_path('app/public'),
             'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
             'visibility' => 'public',
             'throw' => false,

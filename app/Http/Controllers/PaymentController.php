@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\SessionStatus;
 use App\Models\AppSetting;
 use App\Models\LiveSession;
 use App\Models\LiveSessionPayment;
@@ -28,7 +29,7 @@ class PaymentController extends Controller
             abort(403);
         }
 
-        if (! in_array($session->status, ['scheduled', 'live'])) {
+        if (! in_array((string) $session->status, SessionStatus::PAYABLE, true)) {
             abort(400, 'Payment is available only after the live is scheduled.');
         }
 
@@ -94,7 +95,15 @@ class PaymentController extends Controller
             $this->logEvent($payment, 'failed', ['error' => $e->getMessage()]);
             \Log::warning('Payment initiation failed: '.$e->getMessage(), ['payment_id' => $payment->id]);
 
-            return response()->json(['message' => 'Payment provider rejected the request.'], 502);
+            // The gateway services say "X is not configured" when their env keys
+            // are missing; that is an operator problem, not a provider rejection.
+            $unconfigured = str_contains($e->getMessage(), 'is not configured');
+
+            return response()->json([
+                'message' => $unconfigured
+                    ? 'This payment method is not enabled yet.'
+                    : 'Payment provider rejected the request.',
+            ], $unconfigured ? 503 : 502);
         }
 
         $payment->fill([

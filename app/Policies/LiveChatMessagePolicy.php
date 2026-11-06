@@ -1,5 +1,6 @@
 <?php
 namespace App\Policies;
+use App\Enums\SessionStatus;
 use App\Models\LiveSession;
 use App\Models\LiveChatMessage;
 use App\Models\User;
@@ -14,6 +15,7 @@ class LiveChatMessagePolicy
             ->exists();
     }
     public function create(User $user, LiveSession $liveSession) {
-        return $liveSession->status === "live"; // Patients can chat if live
+        // الشات داخل البثّ فقط: مؤكَّدة قبل الهواء ولا منتهية/ملغاة بعدها.
+        return (string) $liveSession->status === SessionStatus::Live->value;
     }
 }

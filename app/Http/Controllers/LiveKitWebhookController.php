@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\SessionStatus;
 use App\Models\LiveParticipant;
 use App\Models\LiveSession;
+use App\Services\Calendar\SessionScheduleService;
 use App\Services\LiveKitWebhookVerifier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -14,12 +16,16 @@ use Illuminate\Support\Facades\Log;
  * الأمان: كل طلب لازم يكون موقّع بـ JWT من LiveKit (هيدر Authorization)
  * ومتحقّق منه عبر [LiveKitWebhookVerifier] — وإلا أي حد يقدر يبعت
  * طلب مزيف ينهي جلسة أو يغيّر حالة مشارك.
+ *
+ * كتابة حالة الجلسة لا تتم هنا مباشرة: تمر عبر SessionScheduleService حتى لا يُنقض
+ * قانون الحالة الواحد في موضعين.
  */
 class LiveKitWebhookController extends Controller
 {
-    public function __construct(protected LiveKitWebhookVerifier $verifier)
-    {
-    }
+    public function __construct(
+        protected LiveKitWebhookVerifier $verifier,
+        private readonly SessionScheduleService $sessions,
+    ) {}
 
     public function handle(Request $request)
     {
@@ -71,9 +77,10 @@ class LiveKitWebhookController extends Controller
         } elseif ($eventName === 'participant_left' && $participant) {
             $participant->update(['status' => 'left', 'left_at' => now()]);
         } elseif ($eventName === 'room_finished') {
-            // انتهاء الغرفة = انتهاء الجلسة (ما لم تكن منتهية أصلاً).
-            if ($session->status !== 'ended') {
-                $session->update(['status' => 'ended', 'ended_at' => now()]);
+            // انتهاء الغرفة = انتهاء الجلسة، ما دامت في حالة «الغرفة تعمل أو مُفترضة».
+            // ملغاة أو فائتة أو منتهية لا تُمسّ: بوّابة خارجية لا تردّ جلسة أغلقها الأدمن.
+            if (in_array((string) $session->status, SessionStatus::CLOSABLE, true)) {
+                $this->sessions->markEnded($session);
             }
             LiveParticipant::where('live_session_id', $session->id)
                 ->where('status', 'connected')

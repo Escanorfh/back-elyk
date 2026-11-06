@@ -1,5 +1,6 @@
 <?php
 namespace App\Http\Controllers;
+use App\Enums\SessionStatus;
 use App\Models\LiveSession;
 use App\Models\LiveParticipant;
 use App\Models\LiveRaiseHandRequest;
@@ -14,7 +15,7 @@ class LiveRaiseHandController extends Controller
     public function __construct(LiveKitService $liveKit) { $this->liveKit = $liveKit; }
 
     public function raiseHand(Request $request, LiveSession $session) {
-        if ($session->status !== "live") abort(400, "Session is not live.");
+        if ((string) $session->status !== SessionStatus::Live->value) abort(400, "Session is not live.");
         $participant = LiveParticipant::where("live_session_id", $session->id)->where("user_id", $request->user()->id)->firstOrFail();
         if ($participant->status === "speaking") abort(400, "Already speaking.");
         

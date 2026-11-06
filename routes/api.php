@@ -23,6 +23,17 @@ Route::options("/media-file/{path}", function () {
     ]);
 })->where("path", ".*");
 
+// alias بلا /v1 للنسخ القديمة من التطبيق التي تبني الرابط هكذا
+Route::get("/media-file", [\App\Http\Controllers\MediaStreamController::class, "show"]);
+Route::options("/media-file", function () {
+    return response("", 204, [
+        "Access-Control-Allow-Origin" => "*",
+        "Access-Control-Allow-Methods" => "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers" => "Range, Content-Type, Authorization, X-Requested-With",
+        "Access-Control-Max-Age" => "86400",
+    ]);
+});
+
 Route::prefix('v1')->group(function () {
 
     // ─── Auth (public) ───
@@ -36,10 +47,28 @@ Route::prefix('v1')->group(function () {
     Route::post("/webhooks/instapay", [\App\Http\Controllers\Webhooks\InstaPayWebhookController::class, "handle"])
         ->middleware("webhook.signature:instapay");
 
+    // ─── Scheduler ───
+    // بديل cron على Wasmer: نداء خارجي واحد لكل دقيقة، محمي بمفتاح خاص لا بمستخدم.
+    // GET مقبول لأن خطط cron المجانية ترسل GET فقط؛ الترويسة هي الباب في الحالتين.
+    Route::match(['get', 'post'], '/scheduler/reminders', [\App\Http\Controllers\SchedulerController::class, 'dispatch'])
+        ->middleware('scheduler.token');
+
     // ─── App Info (public) ───
     Route::get('/app/about', [\App\Http\Controllers\ProfileController::class, 'about']);
     Route::get('/app/privacy', [\App\Http\Controllers\ProfileController::class, 'privacy']);
     Route::get('/app/terms', [\App\Http\Controllers\ProfileController::class, 'terms']);
+
+    // نفس بثّ الوسائط أعلاه لكن بمسار بلا نقاط: Wasmer Edge يخدم أي طلب آخر
+    // مقطعُه يحتوي نقطة كملف ثابت ولا يمرّره إلى PHP.
+    Route::get('/media-file', [\App\Http\Controllers\MediaStreamController::class, 'show']);
+    Route::options('/media-file', function () {
+        return response("", 204, [
+            "Access-Control-Allow-Origin" => "*",
+            "Access-Control-Allow-Methods" => "GET, HEAD, OPTIONS",
+            "Access-Control-Allow-Headers" => "Range, Content-Type, Authorization, X-Requested-With",
+            "Access-Control-Max-Age" => "86400",
+        ]);
+    });
 
     // ─── Protected Routes ───
     Route::middleware(['auth:sanctum'])->group(function () {
@@ -128,6 +157,25 @@ Route::prefix('v1')->group(function () {
             Route::get('/admin/sessions/approval-queue', [\App\Http\Controllers\Admin\SessionApprovalController::class, 'queue']);
             Route::post('/admin/sessions/{session}/patients/{patient}/approve', [\App\Http\Controllers\Admin\SessionApprovalController::class, 'approve']);
             Route::post('/admin/sessions/{session}/patients/{patient}/reject', [\App\Http\Controllers\Admin\SessionApprovalController::class, 'reject']);
+
+            // Calendar — Admin: قراءة مجمَّعة، أدوات اختيار الوقت، وإسناد عناصر للمريض
+            Route::get('/admin/calendar', [\App\Http\Controllers\Calendar\Admin\AdminCalendarController::class, 'index']);
+            Route::get('/admin/calendar/availability', [\App\Http\Controllers\Calendar\Admin\AdminScheduleController::class, 'availability']);
+            Route::get('/admin/calendar/conflicts', [\App\Http\Controllers\Calendar\Admin\AdminScheduleController::class, 'conflicts']);
+
+            Route::post('/admin/patients/{patient}/events', [\App\Http\Controllers\Calendar\Admin\AdminCalendarItemController::class, 'storeEvent']);
+            Route::put('/admin/calendar-events/{event}', [\App\Http\Controllers\Calendar\Admin\AdminCalendarItemController::class, 'updateEvent']);
+            Route::delete('/admin/calendar-events/{event}', [\App\Http\Controllers\Calendar\Admin\AdminCalendarItemController::class, 'destroyEvent']);
+
+            Route::post('/admin/patients/{patient}/tasks', [\App\Http\Controllers\Calendar\Admin\AdminCalendarItemController::class, 'storeTask']);
+            Route::put('/admin/personal-tasks/{task}', [\App\Http\Controllers\Calendar\Admin\AdminCalendarItemController::class, 'updateTask']);
+            Route::delete('/admin/personal-tasks/{task}', [\App\Http\Controllers\Calendar\Admin\AdminCalendarItemController::class, 'destroyTask']);
+
+            Route::put('/admin/path-steps/{step}/schedule', [\App\Http\Controllers\PathStepController::class, 'scheduleDate']);
+            Route::delete('/admin/path-steps/{step}/schedule', [\App\Http\Controllers\PathStepController::class, 'clearSchedule']);
+
+            // صحة المُشغِّل: lag والتراكم والإيجارات الميتة وحالة التقليم — أرقام فقط، بلا محتوى.
+            Route::get('/admin/reminders/health', \App\Http\Controllers\Calendar\Admin\AdminReminderHealthController::class);
         });
 
         // Treatment Path — Patient
@@ -138,6 +186,30 @@ Route::prefix('v1')->group(function () {
         Route::post("/me/paths/{path}/submit-step", [\App\Http\Controllers\PatientPathController::class, "submitStep"]);
         Route::post("/path-steps/{step}/assignment", [\App\Http\Controllers\AssignmentController::class, "submit"]);
         Route::get("/assignments/{assignment}/feedback", [\App\Http\Controllers\FeedbackController::class, "indexPatient"]);
+
+        // Calendar — Patient (تقويم المريض وأحداثه ومهامه الشخصية)
+        Route::middleware('role:patient')->group(function () {
+            Route::get('/me/calendar', [\App\Http\Controllers\Calendar\MyCalendarController::class, 'index']);
+
+            Route::get('/me/events', [\App\Http\Controllers\Calendar\MyEventController::class, 'index']);
+            Route::post('/me/events', [\App\Http\Controllers\Calendar\MyEventController::class, 'store']);
+            Route::get('/me/events/{event}', [\App\Http\Controllers\Calendar\MyEventController::class, 'show']);
+            Route::put('/me/events/{event}', [\App\Http\Controllers\Calendar\MyEventController::class, 'update']);
+            Route::delete('/me/events/{event}', [\App\Http\Controllers\Calendar\MyEventController::class, 'destroy']);
+
+            Route::get('/me/tasks', [\App\Http\Controllers\Calendar\MyTaskController::class, 'index']);
+            Route::post('/me/tasks', [\App\Http\Controllers\Calendar\MyTaskController::class, 'store']);
+            Route::get('/me/tasks/{task}', [\App\Http\Controllers\Calendar\MyTaskController::class, 'show']);
+            Route::put('/me/tasks/{task}', [\App\Http\Controllers\Calendar\MyTaskController::class, 'update']);
+            Route::delete('/me/tasks/{task}', [\App\Http\Controllers\Calendar\MyTaskController::class, 'destroy']);
+            Route::post('/me/tasks/{task}/complete', [\App\Http\Controllers\Calendar\MyTaskController::class, 'complete']);
+            Route::post('/me/tasks/{task}/reopen', [\App\Http\Controllers\Calendar\MyTaskController::class, 'reopen']);
+        });
+
+        // Calendar — مزامنة الإشعارات المحلية: نافذة reminders ليجدولها الجهاز، وإقرار بما خُطِّط.
+        // خارج role:patient عمدًا: المعالج طرف في جلساته وله تذكيراتها أيضًا.
+        Route::get('/me/reminders', [\App\Http\Controllers\Calendar\MyReminderController::class, 'index']);
+        Route::post('/me/reminders/{reminder}/ack', [\App\Http\Controllers\Calendar\MyReminderController::class, 'ack']);
 
         // Patient Routes
         Route::middleware('role:patient')->group(function () {
@@ -158,6 +230,12 @@ Route::prefix('v1')->group(function () {
         Route::delete("/live-sessions/{session}", [\App\Http\Controllers\LiveSessionController::class, "destroy"]);
         Route::post("/live-sessions/{session}/start", [\App\Http\Controllers\LiveSessionController::class, "start"]);
         Route::post("/live-sessions/{session}/end", [\App\Http\Controllers\LiveSessionController::class, "end"]);
+        // انتقالات حالة التقويم — كلها عبر SessionScheduleService وبوّابته_one_source_of_truth.
+        Route::put("/live-sessions/{session}", [\App\Http\Controllers\LiveSessionController::class, "update"]);
+        Route::post("/live-sessions/{session}/confirm", [\App\Http\Controllers\LiveSessionController::class, "confirm"]);
+        Route::post("/live-sessions/{session}/cancel", [\App\Http\Controllers\LiveSessionController::class, "cancel"]);
+        Route::post("/live-sessions/{session}/reschedule", [\App\Http\Controllers\LiveSessionController::class, "reschedule"]);
+        Route::post("/live-sessions/{session}/mark-missed", [\App\Http\Controllers\LiveSessionController::class, "markMissed"]);
         Route::post("/live-sessions/{session}/join-token", [\App\Http\Controllers\LiveSessionController::class, "joinToken"]);
         Route::get("/live-sessions/{session}/participants", [\App\Http\Controllers\LiveSessionController::class, "participants"]);
         Route::post("/live-sessions/{session}/participants/{participant}/audio", [\App\Http\Controllers\LiveSessionController::class, "setAudio"]);

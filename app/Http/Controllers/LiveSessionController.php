@@ -1,17 +1,25 @@
 <?php
 namespace App\Http\Controllers;
-use App\Models\AppSetting;
+use App\Enums\SessionStatus;
 use App\Models\LiveSession;
 use App\Models\LiveParticipant;
+use App\Services\Calendar\SessionScheduleService;
 use App\Services\LiveKitService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Gate;
 
+/**
+ * جلسات اللايف: القائمة، بدء البثّ وإنهاؤها، الدفع، المشاركون ورمز الدخول.
+ *
+ * لا موضع يكتب حالة الجلسة هنا: كل انتقال يمر عبر SessionScheduleService — قانون واحد في
+ * App\Enums\SessionStatus وبوّابة calendar.status_widening_enabled — حتى لا تتباعد
+ * الأزرار عن بوّابة LiveKit عن التقويم.
+ */
 class LiveSessionController extends Controller
 {
     protected LiveKitService $liveKit;
-    public function __construct(LiveKitService $liveKit) { $this->liveKit = $liveKit; }
+    public function __construct(LiveKitService $liveKit, protected SessionScheduleService $schedule) { $this->liveKit = $liveKit; }
 
     public function index(Request $request) {
         if ($request->user()->role === "admin") {
@@ -28,18 +36,9 @@ class LiveSessionController extends Controller
             }
         } else {
             $me = $request->user()->id;
-            $sessions = LiveSession::whereIn("status", ["scheduled", "live"])
+            // قاعدة واحدة: ملكية المريض + الحالات المعروضة (App\Enums\SessionStatus::PATIENT_LIST).
+            $sessions = LiveSession::query()->listedForPatient($me)
                 ->withCount("invites")
-                ->where(function ($q) use ($me) {
-                    $q->whereHas("invites", function ($qq) use ($me) {
-                        $qq->where("patient_id", $me);
-                    })->orWhere(function ($q2) use ($me) {
-                        $q2->whereDoesntHave("invites")
-                            ->where(function ($q3) use ($me) {
-                                $q3->whereNull("patient_id")->orWhere("patient_id", $me);
-                            });
-                    });
-                })
                 ->orderByDesc("id")
                 ->get();
             // حالة دفع المريض الحالي لكل جلسة (none/pending/paid/...).
@@ -84,38 +83,63 @@ class LiveSessionController extends Controller
 
     public function store(Request $request) {
         if ($request->user()->role !== "admin") abort(403);
-        $validated = $request->validate([
-            "title" => "required|string|max:255",
-            "fee_amount" => "nullable|integer",
-            "fee_currency" => "nullable|string|size:3",
-            "scheduled_at" => "nullable|date",
-            "patient_id" => "nullable|integer|exists:users,id",
-            "patient_ids" => "nullable|array",
-            "patient_ids.*" => "integer|exists:users,id",
-        ]);
-        $inviteIds = array_unique($validated["patient_ids"] ?? []);
-        unset($validated["patient_ids"]);
-        // Dynamic price fallback: explicit per-session fee wins, otherwise the
-        // system default applies (null stays null only when no default exists).
-        $validated["fee_amount"] = $validated["fee_amount"] ?? AppSetting::getValue("default_session_price");
-        $validated["fee_currency"] = $validated["fee_currency"] ?? AppSetting::getValue("session_currency", "EGP");
-        $session = LiveSession::create(array_merge($validated, [
-            "admin_id" => $request->user()->id,
-            "livekit_room_name" => "room_" . Str::random(10),
-        ]));
-        foreach ($inviteIds as $pid) {
-            \App\Models\LiveSessionPatient::firstOrCreate([
-                "live_session_id" => $session->id,
-                "patient_id" => $pid,
-            ]);
-        }
-        $session->refresh();
+        // الإنشاء يمرّ بالخدمة نفسها: تدقيق المدعوين، فحص التعارض، التذكيرات وإشعار الموعد.
+        // scheduled_at يبقى اختياريًا كما كان، فالأدمن ينشئ الجلسة أحيانًا بلا ميعاد.
+        $validated = $request->validate(["title" => "required|string|max:255"] + SessionScheduleService::rules(required: false));
+        $session = $this->schedule->create($request->user(), $validated);
         return response()->json(["data" => $session]);
+    }
+
+    // تعديل محتوى الجلسة وموعدها بلا انتقال حالة: المسار نفسه الذي يحمي التعارض والتذكيرات.
+    public function update(Request $request, LiveSession $session) {
+        Gate::authorize("update", $session);
+        $validated = $request->validate(SessionScheduleService::rules(required: false));
+        $session = $this->schedule->update($session, $validated);
+        return response()->json(["data" => $session]);
+    }
+
+    // الانتقالات الوسيطة (confirm/cancel/missed) تمرّ ببوّابة calendar.status_widening_enabled:
+    // وهي مغلقة افتراضيًا فلا تكتب حالة لم يعرفها التطبيق قبل التقويم، وتُفتح عندما يكون جاهزًا.
+    public function confirm(Request $request, LiveSession $session) {
+        Gate::authorize("update", $session);
+        return response()->json(["data" => $this->schedule->confirm($session)]);
+    }
+
+    public function cancel(Request $request, LiveSession $session) {
+        Gate::authorize("update", $session);
+        $validated = $request->validate(["reason" => "nullable|string|max:1000"]);
+        $session = $this->schedule->cancel($session, $validated["reason"] ?? null);
+        return response()->json(["data" => $session]);
+    }
+
+    // إعادة الجدولة تاريخٌ لا حالة: العمودان previous_scheduled_at/rescheduled_at يحفظان ما كان.
+    public function reschedule(Request $request, LiveSession $session) {
+        Gate::authorize("update", $session);
+        $validated = $request->validate([
+            "scheduled_at" => "required|date",
+            "ends_at" => "nullable|date",
+            "reminder_offsets" => "nullable|array",
+            "reminder_offsets.*" => ["integer", "min:0", "max:20160", "distinct"],
+        ]);
+        $session = $this->schedule->reschedule(
+            $session,
+            $validated["scheduled_at"],
+            $validated["ends_at"] ?? null,
+            $request->user(),
+            $validated["reminder_offsets"] ?? null
+        );
+        return response()->json(["data" => $session]);
+    }
+
+    public function markMissed(Request $request, LiveSession $session) {
+        Gate::authorize("update", $session);
+        return response()->json(["data" => $this->schedule->markMissed($session)]);
     }
 
     public function start(Request $request, LiveSession $session) {
         Gate::authorize("update", $session);
-        if ($session->status !== "scheduled") abort(400, "Session is not scheduled.");
+        // scheduled|confirmed وحدهما تُشعلان لاييفًا؛ المباشرة لا تُشعل مرتين.
+        $session = $this->schedule->markLive($session);
         // الأدمن حر في فتح اللايف في أي وقت — لا نتحقق من اليوم/الساعة المختارة.
         // LiveKit اختياري: إن لم يكن السيرفر يعمل نكمل بدونه (الفيديو placeholder).
         try {
@@ -123,7 +147,6 @@ class LiveSessionController extends Controller
         } catch (\Exception $e) {
             \Log::warning("LiveKit createRoom failed, continuing without video room: " . $e->getMessage());
         }
-        $session->update(["status" => "live", "started_at" => now()]);
 
         // إشعار المرضى ببدء البث (صفحة الإشعارات + دفع للجهاز).
         // ملفوف بـ try/catch حتى لا يفشل بدء الجلسة بسبب الإشعارات.
@@ -139,27 +162,27 @@ class LiveSessionController extends Controller
             \Log::warning("liveAudience failed on start: " . $e->getMessage());
         }
 
-        return response()->json(["message" => "Session started", "data" => $session->fresh()]);
+        return response()->json(["message" => "Session started", "data" => $session]);
     }
 
     public function end(Request $request, LiveSession $session) {
         Gate::authorize("update", $session);
-        if ($session->status === "ended") abort(400, "Already ended.");
+        // التحويل أولًا: جلسة نهائية لا تُهدم غرفتها ثم تُرفض. الخدمة تُطفئ تذكيراتها معها.
+        $session = $this->schedule->markEnded($session);
         try {
             $this->liveKit->deleteRoom($session->livekit_room_name);
         } catch (\Exception $e) {
             \Log::warning("LiveKit deleteRoom failed: " . $e->getMessage());
         }
-        $session->update(["status" => "ended", "ended_at" => now()]);
-        return response()->json(["message" => "Session ended"]);
+        return response()->json(["message" => "Session ended", "data" => $session]);
     }
 
     // المريض يسجّل دفعه (يدوي — برقم التحويل) بعد تحديد اللايف فقط.
     public function pay(Request $request, LiveSession $session) {
         $user = $request->user();
         if ($user->role !== "patient") abort(403);
-        // خيار الدفع يُفتح فقط بعد تحديد اللايف (مجدولة/مباشرة).
-        if (!in_array($session->status, ["scheduled", "live"])) {
+        // خيار الدفع يُفتح فقط بعد تحديد اللايف (مجدولة/مؤكَّدة/مباشرة).
+        if (!in_array((string) $session->status, SessionStatus::PAYABLE, true)) {
             abort(400, "Payment is available only after the live is scheduled.");
         }
         if (!$session->fee_amount) abort(400, "This session has no fee.");
@@ -307,7 +330,7 @@ class LiveSessionController extends Controller
 
     public function destroy(Request $request, LiveSession $session) {
         Gate::authorize("update", $session);
-        if ($session->status === "live") {
+        if ($session->status === SessionStatus::Live->value) {
             try {
                 $this->liveKit->deleteRoom($session->livekit_room_name);
             } catch (\Exception $e) {}
@@ -317,7 +340,9 @@ class LiveSessionController extends Controller
     }
 
     public function joinToken(Request $request, LiveSession $session) {
-        if ($session->status !== "live" && $request->user()->role !== "admin") abort(400, "Session is not live.");
+        if ($session->status !== SessionStatus::Live->value && $request->user()->role !== "admin") {
+            abort(400, "Session is not live.");
+        }
 
         // الدخول للمختارين فقط عندما توجد دعوات.
         if ($request->user()->role !== "admin" && !$this->canAccess($session, $request->user())) {
@@ -359,11 +384,9 @@ class LiveSessionController extends Controller
         );
         $participant->update(["status" => "connected", "left_at" => null]);
 
-        // بث صوتي فقط للخصوصية — لا كاميرا لأي طرف (أدمن أو مريض).
-        // المريض يبدأ مستمعاً (can_publish_audio=false) ويتفتح له المايك
-        // فقط بعد قبول الأدمن لطلب رفع اليد.
-        $canPublishVideo = false;
+        // السماح بالكاميرا والمايك؛ المريض يبدأ مستمعاً ويُفتح له المايك بعد قبول الأدمن لطلب رفع اليد.
         $canPublishAudio = $participant->can_publish_audio;
+        $canPublishVideo = $request->user()->role === "admin" || $participant->can_publish_audio;
 
         $token = $this->liveKit->createAccessToken(
             $session->livekit_room_name,

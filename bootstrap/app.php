@@ -16,6 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'role' => \App\Http\Middleware\CheckRole::class,
             'webhook.signature' => \App\Http\Middleware\VerifyWebhookSignature::class,
+            'scheduler.token' => \App\Http\Middleware\AuthenticateSchedulerToken::class,
         ]);
         $middleware->api(append: [\App\Http\Middleware\TraceApi::class]);
     })

@@ -4,8 +4,12 @@ use Illuminate\Http\Request;
 use App\Models\PatientPath;
 use App\Models\User;
 use App\Notifications\StepReleasedNotification;
+use App\Services\Calendar\SessionScheduleService;
+use Illuminate\Support\Facades\DB;
 
 class PatientPathController extends Controller {
+    public function __construct(protected SessionScheduleService $sessions) {}
+
     public function indexAdmin(Request $request, User $patient) {
         $paths = PatientPath::where("patient_id", $patient->id)->with("disorder")->get();
         return response()->json(["data" => $paths]);
@@ -141,32 +145,23 @@ class PatientPathController extends Controller {
         }
 
         // إتمام الخطوة الحالية (إن وجدت) وإغلاق المسار — اللايف هو المرحلة الأخيرة.
-        if ($path->currentStep) {
-            $path->currentStep->update(["status" => "completed", "completed_at" => now()]);
-        }
-        $path->update(["status" => "completed", "current_step_id" => null]);
-
-        $session = \App\Models\LiveSession::create([
-            "admin_id" => $request->user()->id,
-            "patient_id" => $path->patient_id,
-            "title" => $validated["title"] ?? "جلسة لايف متابعة",
-            "status" => "scheduled",
-            "scheduled_at" => $validated["scheduled_at"],
-            "livekit_room_name" => "room_" . \Illuminate\Support\Str::random(10),
-        ]);
-        foreach ($ids as $pid) {
-            \App\Models\LiveSessionPatient::firstOrCreate([
-                "live_session_id" => $session->id,
-                "patient_id" => $pid,
+        // الجدولة تُغلِق المسار في نفس المعاملة: تعارض وقت (409 من الخدمة) يُلغي إغلاق المسار
+        // فلا يُغلق مسار بلا جلسة خلفه.
+        $session = DB::transaction(function () use ($request, $path, $validated, $ids) {
+            $session = $this->sessions->create($request->user(), [
+                "title" => $validated["title"] ?? "جلسة لايف متابعة",
+                "scheduled_at" => $validated["scheduled_at"],
+                "patient_id" => $path->patient_id,
+                "patient_ids" => $ids->all(),
             ]);
-        }
-        $session->refresh();
 
-        // إشعار المدعوين (صفحة الإشعارات + دفع للجهاز).
-        $invited = \App\Models\User::whereIn("id", $ids)->get();
-        foreach ($invited as $patient) {
-            $patient->notify(new \App\Notifications\LiveScheduledNotification($session));
-        }
+            if ($path->currentStep) {
+                $path->currentStep->update(["status" => "completed", "completed_at" => now()]);
+            }
+            $path->update(["status" => "completed", "current_step_id" => null]);
+
+            return $session;
+        });
 
         return response()->json(["message" => "Live day scheduled", "data" => $session]);
     }
