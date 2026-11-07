@@ -35,11 +35,16 @@ debug: false
 scaling:
   mode: single_concurrency
 jobs:
-- name: after_deploy
+- name: laravel-database-migrations
   trigger: post-deployment
+  timeout: 5m
   action:
     execute:
-      command: after_deploy
+      command: php
+      cli_args:
+      - artisan
+      - migrate
+      - --force
 annotations:
   anybuild.run/config:
     composer_build_script: post-update-cmd
