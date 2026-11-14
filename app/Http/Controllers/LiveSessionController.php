@@ -304,14 +304,16 @@ class LiveSessionController extends Controller
             "can_publish_audio" => $allowed,
             "status" => $allowed ? "speaking" : "connected",
         ]);
-        try {
-            $this->liveKit->updateParticipantPermissions(
-                $session->livekit_room_name, $participant->livekit_identity, $allowed);
-        } catch (\Exception $e) {
-            \Log::warning("LiveKit permission update failed: " . $e->getMessage());
-        }
+        // نتيجة تحديث LiveKit تُفصل عن موافقة DB — لا نجاح وهمي.
+        $result = $this->liveKit->updateParticipantPermissions(
+            $session->livekit_room_name, $participant->livekit_identity, $allowed);
+        $livekitUpdated = is_array($result) ? (bool) ($result["ok"] ?? false) : false;
+        broadcast(new \App\Events\LiveParticipantPermissionEvent($session, $participant, $allowed, $livekitUpdated));
         return response()->json([
-            "message" => $allowed ? "Microphone opened" : "Microphone muted",
+            "message" => $allowed
+                ? ($livekitUpdated ? "Microphone opened" : "Microphone opened, but LiveKit permission update failed. Retry to re-sync.")
+                : ($livekitUpdated ? "Microphone muted" : "Microphone muted, but LiveKit permission update failed. Retry to re-revoke."),
+            "livekit_updated" => $livekitUpdated,
             "data" => $participant->fresh(),
         ]);
     }
@@ -396,9 +398,26 @@ class LiveSessionController extends Controller
             $canPublishVideo
         );
 
+        // بيانات قناة Real-time (Reverb) للعميل — المفتاح APP_KEY علني بتصميم
+        // بروتوكول Pusher، والأسرار (APP_SECRET/APP_ID) تبقى على السيرفر فقط.
+        $realtime = null;
+        if (config("broadcasting.default") === "reverb") {
+            $reverb = config("broadcasting.connections.reverb", []);
+            $host = $reverb["options"]["host"] ?? "localhost";
+            $port = $reverb["options"]["port"] ?? 443;
+            $scheme = $reverb["options"]["scheme"] ?? "https";
+            $realtime = [
+                "ws_url" => (($scheme === "https" || $scheme === "wss") ? "wss" : "ws")
+                    . "://{$host}:{$port}",
+                "app_key" => $reverb["key"],
+                "channel" => "live." . $session->id,
+            ];
+        }
+
         return response()->json(["data" => [
             "token" => $token,
             "livekit_url" => config("services.livekit.ws_url", "ws://127.0.0.1:7880"),
+            "realtime" => $realtime,
             "participant" => $request->user()->role === "admin" 
                 ? new \App\Http\Resources\AdminParticipantResource($participant) 
                 : new \App\Http\Resources\PatientParticipantResource($participant)

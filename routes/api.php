@@ -225,6 +225,10 @@ Route::prefix('v1')->group(function () {
         });
 
         // Live Sessions
+        // مصادقة قنوات البث (Reverb/Pusher) للتطبيق عبر Sanctum Bearer —
+        // عميل Real-time يصادق على القنوات الخاصة هنا (broadcasting/auth).
+        Route::match(["get", "post"], "/broadcasting/auth", [\Illuminate\Broadcasting\BroadcastController::class, "authenticate"])
+            ->middleware("auth:sanctum");
         Route::get("/live-sessions", [\App\Http\Controllers\LiveSessionController::class, "index"]);
         Route::post("/live-sessions", [\App\Http\Controllers\LiveSessionController::class, "store"]);
         Route::delete("/live-sessions/{session}", [\App\Http\Controllers\LiveSessionController::class, "destroy"]);

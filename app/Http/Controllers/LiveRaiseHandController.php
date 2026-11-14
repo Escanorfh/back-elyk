@@ -46,8 +46,20 @@ class LiveRaiseHandController extends Controller
         $participant = $handRequest->participant;
         $participant->update(["status" => "speaking", "can_publish_audio" => true]);
         
-        $this->liveKit->updateParticipantPermissions($session->livekit_room_name, $participant->livekit_identity, true);
-        return response()->json(["message" => "Approved"]);
+        // موافقة DB لا تعني نجاح تحديث LiveKit — النتيجة تُفصل وتُبثّ وتُعاد للمتصرف.
+        $result = $this->liveKit->updateParticipantPermissions($session->livekit_room_name, $participant->livekit_identity, true);
+        $livekitUpdated = is_array($result) ? (bool) ($result["ok"] ?? false) : false;
+        
+        broadcast(new \App\Events\LiveParticipantPermissionEvent($session, $participant, true, $livekitUpdated));
+        broadcast(new \App\Events\LiveHandResolvedEvent($handRequest->fresh(), "approved", $livekitUpdated));
+        
+        return response()->json([
+            "message" => $livekitUpdated
+                ? "Approved"
+                : "Approved, but LiveKit permission update failed. Retry with microphone open to re-sync.",
+            "livekit_updated" => $livekitUpdated,
+            "data" => $participant->fresh(),
+        ]);
     }
 
     public function deny(Request $request, LiveRaiseHandRequest $handRequest) {
@@ -56,6 +68,10 @@ class LiveRaiseHandController extends Controller
         
         $handRequest->update(["status" => "denied", "resolved_at" => now(), "resolved_by" => $request->user()->id]);
         $handRequest->participant->update(["status" => "connected"]);
+        
+        // الرفض لا يمس صلاحية LiveKit (كانت false أصلًا) — livekit_updated = null.
+        broadcast(new \App\Events\LiveHandResolvedEvent($handRequest->fresh(), "denied", null));
+        
         return response()->json(["message" => "Denied"]);
     }
 
@@ -64,7 +80,16 @@ class LiveRaiseHandController extends Controller
         if ($participant->live_session_id !== $session->id) abort(404);
         
         $participant->update(["status" => "connected", "can_publish_audio" => false]);
-        $this->liveKit->updateParticipantPermissions($session->livekit_room_name, $participant->livekit_identity, false);
-        return response()->json(["message" => "Muted"]);
+        
+        $result = $this->liveKit->updateParticipantPermissions($session->livekit_room_name, $participant->livekit_identity, false);
+        $livekitUpdated = is_array($result) ? (bool) ($result["ok"] ?? false) : false;
+        
+        broadcast(new \App\Events\LiveParticipantPermissionEvent($session, $participant, false, $livekitUpdated));
+        
+        return response()->json([
+            "message" => $livekitUpdated ? "Muted" : "Muted, but LiveKit permission update failed. Publishing will be re-revoked on retry.",
+            "livekit_updated" => $livekitUpdated,
+            "data" => $participant->fresh(),
+        ]);
     }
 }
